@@ -35,13 +35,19 @@ const EMAIL_CONFIG = {
 
 function getTransporter() {
     // 每次都重新创建，确保使用最新的环境变量
+    // 使用587端口+TLS，兼容性更好，避免IPv6问题
+    const port = parseInt(process.env.EMAIL_PORT) || 587;
     return nodemailer.createTransport({
         host: process.env.EMAIL_HOST || 'smtp.qq.com',
-        port: parseInt(process.env.EMAIL_PORT) || 465,
-        secure: true,
+        port: port,
+        secure: port === 465, // 465用SSL，587用STARTTLS
         auth: {
             user: process.env.EMAIL_USER || '',
             pass: process.env.EMAIL_PASS || ''
+        },
+        tls: {
+            rejectUnauthorized: false,
+            minVersion: 'TLSv1.2'
         }
     });
 }
