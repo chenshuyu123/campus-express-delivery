@@ -3,6 +3,10 @@
  * 技术栈: Node.js + Express + sql.js (纯JS SQLite)
  */
 
+// 强制 DNS 使用 IPv4，解决 Railway IPv6 不可达问题
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -35,20 +39,22 @@ const EMAIL_CONFIG = {
 
 function getTransporter() {
     // 每次都重新创建，确保使用最新的环境变量
-    // 使用587端口+TLS，兼容性更好，避免IPv6问题
-    const port = parseInt(process.env.EMAIL_PORT) || 587;
+    const port = parseInt(process.env.EMAIL_PORT) || 465;
     return nodemailer.createTransport({
         host: process.env.EMAIL_HOST || 'smtp.qq.com',
         port: port,
-        secure: port === 465, // 465用SSL，587用STARTTLS
+        secure: true,
         auth: {
             user: process.env.EMAIL_USER || '',
             pass: process.env.EMAIL_PASS || ''
         },
         tls: {
-            rejectUnauthorized: false,
-            minVersion: 'TLSv1.2'
-        }
+            rejectUnauthorized: false
+        },
+        // 强制使用 IPv4，避免 Railway 的 IPv6 问题
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 10000
     });
 }
 
