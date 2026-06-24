@@ -33,11 +33,17 @@ const EMAIL_CONFIG = {
     }
 };
 
-let transporter = null;
 function getTransporter() {
-    if (transporter) return transporter;
-    transporter = nodemailer.createTransport(EMAIL_CONFIG);
-    return transporter;
+    // 每次都重新创建，确保使用最新的环境变量
+    return nodemailer.createTransport({
+        host: process.env.EMAIL_HOST || 'smtp.qq.com',
+        port: parseInt(process.env.EMAIL_PORT) || 465,
+        secure: true,
+        auth: {
+            user: process.env.EMAIL_USER || '',
+            pass: process.env.EMAIL_PASS || ''
+        }
+    });
 }
 
 // 生成6位随机验证码
@@ -148,6 +154,14 @@ app.post('/api/auth/send-code', sendCodeLimiter, async (req, res) => {
 
         // 发送邮件
         const mailer = getTransporter();
+        
+        // 调试日志
+        console.log('邮件配置检查:', {
+            host: process.env.EMAIL_HOST || 'smtp.qq.com',
+            user: process.env.EMAIL_USER ? process.env.EMAIL_USER.substring(0, 5) + '***' : '未设置',
+            passExist: !!process.env.EMAIL_PASS
+        });
+        
         const typeNames = { register: '注册', login: '登录', reset_password: '重置密码' };
         const typeName = typeNames[type] || '验证';
 
