@@ -165,8 +165,8 @@ app.post('/api/auth/send-code', sendCodeLimiter, async (req, res) => {
         const typeNames = { register: '注册', login: '登录', reset_password: '重置密码' };
         const typeName = typeNames[type] || '验证';
 
-        await mailer.sendMail({
-            from: `"校园快递系统" <${EMAIL_CONFIG.auth.user}>`,
+        const mailResult = await mailer.sendMail({
+            from: `"校园快递系统" <${process.env.EMAIL_USER}>`,
             to: email,
             subject: `校园快递系统 - ${typeName}验证码`,
             html: `
@@ -183,10 +183,11 @@ app.post('/api/auth/send-code', sendCodeLimiter, async (req, res) => {
             `
         });
 
+        console.log('邮件发送成功:', mailResult.messageId);
         res.json({ code: 200, message: '验证码已发送到您的邮箱' });
 
     } catch (err) {
-        console.error('发送验证码失败:', err);
+        console.error('发送验证码失败:', err.message, err.code, err.command);
         res.json({ code: 500, message: '发送失败: ' + err.message });
     }
 });
