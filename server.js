@@ -19,6 +19,32 @@ const PORT = process.env.PORT || 3000;
 // JWT密钥
 const JWT_SECRET = process.env.JWT_SECRET || 'campus_express_secret_key_2024';
 
+// ==================== 邮箱验证码配置 ====================
+const nodemailer = require('nodemailer');
+
+// QQ邮箱配置（也支持163等其他邮箱）
+const EMAIL_CONFIG = {
+    host: process.env.EMAIL_HOST || 'smtp.qq.com',
+    port: parseInt(process.env.EMAIL_PORT) || 465,
+    secure: true,
+    auth: {
+        user: process.env.EMAIL_USER || '',
+        pass: process.env.EMAIL_PASS || ''
+    }
+};
+
+let transporter = null;
+function getTransporter() {
+    if (transporter) return transporter;
+    transporter = nodemailer.createTransport(EMAIL_CONFIG);
+    return transporter;
+}
+
+// 生成6位随机验证码
+function generateCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 // 全局数据库引用
 let db = null;
 
@@ -71,18 +97,146 @@ function riderMiddleware(req, res, next) {
 
 // ==================== 认证接口 ====================
 
-// 注册
-app.post('/api/auth/register', async (req, res) => {
-    try {
-        const { username, password, phone, real_name, role, dormitory } = req.body;
+// ==================== 邮箱验证码 ====================
 
-        if (!username || !password || !phone) {
-            return res.json({ code: 400, message: '用户名、密码和手机号不能为空' });
+// 发送邮箱验证码
+const sendCodeLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1分钟内
+    max: 1, // 最多1次
+    message: { code: 429, message: '发送过于频繁，请60秒后再试' }
+});
+
+app.post('/api/auth/send-code', sendCodeLimiter, async (req, res) => {
+    try {
+        const { email, type } = req.body;
+
+        if (!email) {
+            return res.json({ code: 400, message: '请输入邮箱地址' });
         }
 
-        const existingUser = db.prepare('SELECT id FROM users WHERE username = ? OR phone = ?').get(username, phone);
+        // 检查邮箱格式
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.json({ code: 400, message: '邮箱格式不正确' });
+        }
+
+        // 注册时检查邮箱是否已注册
+        if (type === 'register') {
+            const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+            if (existing) {
+                return res.json({ code: 400, message: '该邮箱已被注册' });
+            }
+        }
+
+        // 登录时检查邮箱是否存在
+        if (type === 'login') {
+            const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+            if (!existing) {
+                return res.json({ code: 400, message: '该邮箱未注册' });
+            }
+        }
+
+        // 生成验证码
+        const code = generateCode();
+
+        // 存入数据库（5分钟有效）
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        db.prepare(`
+            INSERT INTO email_codes (email, code, type, expires_at)
+            VALUES (?, ?, ?, ?)
+        `).run(email, code, type || 'register', expiresAt);
+
+        // 发送邮件
+        const mailer = getTransporter();
+        const typeNames = { register: '注册', login: '登录', reset_password: '重置密码' };
+        const typeName = typeNames[type] || '验证';
+
+        await mailer.sendMail({
+            from: `"校园快递系统" <${EMAIL_CONFIG.auth.user}>`,
+            to: email,
+            subject: `校园快递系统 - ${typeName}验证码`,
+            html: `
+                <div style="max-width:500px;margin:0 auto;padding:20px;font-family:Arial,sans-serif;">
+                    <h2 style="color:#1a73e8;">校园快递代取系统</h2>
+                    <p>您的${typeName}验证码是：</p>
+                    <div style="background:#f0f4ff;padding:15px;text-align:center;border-radius:8px;margin:20px 0;">
+                        <span style="font-size:32px;font-weight:bold;color:#1a73e8;letter-spacing:5px;">${code}</span>
+                    </div>
+                    <p style="color:#666;">验证码5分钟内有效，请勿泄露给他人。</p>
+                    <hr style="border:none;border-top:1px solid #eee;">
+                    <p style="color:#999;font-size:12px;">如非本人操作，请忽略此邮件。</p>
+                </div>
+            `
+        });
+
+        res.json({ code: 200, message: '验证码已发送到您的邮箱' });
+
+    } catch (err) {
+        console.error('发送验证码失败:', err);
+        res.json({ code: 500, message: '发送失败: ' + err.message });
+    }
+});
+
+// 验证邮箱验证码
+app.post('/api/auth/verify-code', async (req, res) => {
+    try {
+        const { email, code, type } = req.body;
+
+        if (!email || !code) {
+            return res.json({ code: 400, message: '邮箱和验证码不能为空' });
+        }
+
+        // 查找有效的验证码
+        const record = db.prepare(`
+            SELECT * FROM email_codes 
+            WHERE email = ? AND code = ? AND type = ? AND used = 0 AND expires_at > datetime('now')
+            ORDER BY created_at DESC LIMIT 1
+        `).get(email, code, type || 'register');
+
+        if (!record) {
+            return res.json({ code: 400, message: '验证码错误或已过期' });
+        }
+
+        // 标记验证码已使用
+        db.prepare('UPDATE email_codes SET used = 1 WHERE id = ?').run(record.id);
+
+        res.json({ code: 200, message: '验证成功' });
+
+    } catch (err) {
+        console.error('验证失败:', err);
+        res.json({ code: 500, message: '验证失败: ' + err.message });
+    }
+});
+
+// ==================== 注册/登录 ====================
+
+// 注册（增加邮箱+验证码）
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { username, password, phone, email, code, real_name, role, dormitory } = req.body;
+
+        if (!username || !password || !email || !code) {
+            return res.json({ code: 400, message: '用户名、密码、邮箱和验证码不能为空' });
+        }
+
+        // 验证邮箱验证码
+        const codeRecord = db.prepare(`
+            SELECT * FROM email_codes 
+            WHERE email = ? AND code = ? AND type = 'register' AND used = 0 AND expires_at > datetime('now')
+            ORDER BY created_at DESC LIMIT 1
+        `).get(email, code);
+
+        if (!codeRecord) {
+            return res.json({ code: 400, message: '验证码错误或已过期，请重新获取' });
+        }
+
+        // 标记验证码已使用
+        db.prepare('UPDATE email_codes SET used = 1 WHERE id = ?').run(codeRecord.id);
+
+        // 检查用户名/邮箱是否重复
+        const existingUser = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email);
         if (existingUser) {
-            return res.json({ code: 400, message: '用户名或手机号已被注册' });
+            return res.json({ code: 400, message: '用户名或邮箱已被注册' });
         }
 
         const hashedPassword = bcrypt.hashSync(password, 10);
@@ -90,9 +244,9 @@ app.post('/api/auth/register', async (req, res) => {
         const userRole = role || 'student';
 
         db.prepare(`
-            INSERT INTO users (id, username, password, phone, real_name, role, dormitory, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
-        `).run(userId, username, hashedPassword, phone, real_name || '', userRole, dormitory || '');
+            INSERT INTO users (id, username, password, phone, email, real_name, role, dormitory, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+        `).run(userId, username, hashedPassword, phone || '', email, real_name || '', userRole, dormitory || '');
 
         const token = jwt.sign({ id: userId, username, role: userRole }, JWT_SECRET, { expiresIn: '7d' });
 
@@ -101,7 +255,7 @@ app.post('/api/auth/register', async (req, res) => {
             message: '注册成功',
             data: {
                 token,
-                user: { id: userId, username, phone, real_name: real_name || '', role: userRole, dormitory: dormitory || '' }
+                user: { id: userId, username, phone, email, real_name: real_name || '', role: userRole, dormitory: dormitory || '' }
             }
         });
     } catch (err) {
@@ -110,16 +264,65 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// 登录
+// 登录（支持用户名/邮箱 + 密码，或邮箱 + 验证码）
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, password, email, code, loginType } = req.body;
 
-        if (!username || !password) {
-            return res.json({ code: 400, message: '用户名和密码不能为空' });
+        // 方式1：邮箱+验证码登录
+        if (loginType === 'code' && email && code) {
+            const codeRecord = db.prepare(`
+                SELECT * FROM email_codes 
+                WHERE email = ? AND code = ? AND type = 'login' AND used = 0 AND expires_at > datetime('now')
+                ORDER BY created_at DESC LIMIT 1
+            `).get(email, code);
+
+            if (!codeRecord) {
+                return res.json({ code: 400, message: '验证码错误或已过期，请重新获取' });
+            }
+
+            db.prepare('UPDATE email_codes SET used = 1 WHERE id = ?').run(codeRecord.id);
+
+            const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+            if (!user) {
+                return res.json({ code: 400, message: '该邮箱未注册' });
+            }
+
+            if (user.status === 'banned') {
+                return res.json({ code: 403, message: '账号已被封禁' });
+            }
+
+            const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+
+            return res.json({
+                code: 200, message: '登录成功',
+                data: {
+                    token,
+                    user: {
+                        id: user.id, username: user.username, phone: user.phone, email: user.email,
+                        real_name: user.real_name, role: user.role, dormitory: user.dormitory,
+                        avatar: user.avatar, verify_status: user.verify_status, balance: user.balance
+                    }
+                }
+            });
         }
 
-        const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+        // 方式2：用户名/邮箱 + 密码登录
+        if (!username && !email) {
+            return res.json({ code: 400, message: '请输入用户名或邮箱' });
+        }
+        if (!password) {
+            return res.json({ code: 400, message: '请输入密码' });
+        }
+
+        // 支持用邮箱或用户名登录
+        let user;
+        if (email) {
+            user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        } else {
+            user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+        }
+
         if (!user) {
             return res.json({ code: 400, message: '用户名或密码错误' });
         }

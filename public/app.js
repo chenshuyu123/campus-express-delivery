@@ -121,21 +121,117 @@ function closeModal(id) {
     }
 }
 
+// ==================== 登录方式切换 ====================
+function switchLoginTab(tab) {
+    document.getElementById('tabPassword').classList.toggle('active', tab === 'password');
+    document.getElementById('tabCode').classList.toggle('active', tab === 'code');
+    document.getElementById('loginFormPassword').style.display = tab === 'password' ? 'block' : 'none';
+    document.getElementById('loginFormCode').style.display = tab === 'code' ? 'block' : 'none';
+}
+
+// ==================== 验证码倒计时 ====================
+let codeTimers = {};
+
+function startCountdown(btnId, seconds = 60) {
+    if (codeTimers[btnId]) clearInterval(codeTimers[btnId]);
+    const btn = document.getElementById(btnId);
+    btn.disabled = true;
+    let remaining = seconds;
+    btn.textContent = remaining + '秒后重发';
+
+    codeTimers[btnId] = setInterval(() => {
+        remaining--;
+        btn.textContent = remaining + '秒后重发';
+        if (remaining <= 0) {
+            clearInterval(codeTimers[btnId]);
+            btn.disabled = false;
+            btn.textContent = '获取验证码';
+        }
+    }, 1000);
+}
+
+// 发送验证码通用函数
+async function sendCode(email, type, btnId) {
+    if (!email) {
+        toast('请先输入邮箱地址', 'error');
+        return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        toast('请输入正确的邮箱地址', 'error');
+        return;
+    }
+
+    const res = await api('/auth/send-code', {
+        method: 'POST',
+        body: JSON.stringify({ email, type })
+    });
+
+    if (res.code === 200) {
+        toast('验证码已发送到您的邮箱', 'success');
+        startCountdown(btnId);
+    } else {
+        toast(res.message || '发送失败', 'error');
+    }
+}
+
+// 注册发送验证码
+function sendRegCode() {
+    const email = document.getElementById('regEmail').value.trim();
+    sendCode(email, 'register', 'regSendCodeBtn');
+}
+
+// 登录发送验证码
+function sendLoginCode() {
+    const email = document.getElementById('loginEmail').value.trim();
+    sendCode(email, 'login', 'loginSendCodeBtn');
+}
+
+// ==================== 登录 ====================
+
+// 密码登录
 async function login(e) {
     e.preventDefault();
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value.trim();
 
     if (!username || !password) {
-        toast('请输入用户名和密码', 'error');
+        toast('请输入用户名/邮箱和密码', 'error');
+        return;
+    }
+
+    // 判断输入的是邮箱还是用户名
+    const isEmail = username.includes('@');
+    const body = isEmail ? { email: username, password } : { username, password };
+
+    const res = await api('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(body)
+    });
+
+    handleLoginResult(res);
+}
+
+// 验证码登录
+async function loginByCode(e) {
+    e.preventDefault();
+    const email = document.getElementById('loginEmail').value.trim();
+    const code = document.getElementById('loginCode').value.trim();
+
+    if (!email || !code) {
+        toast('请输入邮箱和验证码', 'error');
         return;
     }
 
     const res = await api('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ email, code, loginType: 'code' })
     });
 
+    handleLoginResult(res);
+}
+
+function handleLoginResult(res) {
     if (res.code === 200) {
         token = res.data.token;
         localStorage.setItem('token', token);
@@ -143,8 +239,7 @@ async function login(e) {
         closeModal('loginModal');
         updateNavUI();
         toast('登录成功', 'success');
-        
-        // 根据角色跳转
+
         if (currentUser.role === 'admin') navigateTo('admin');
         else if (currentUser.role === 'rider') navigateTo('rider');
         else navigateTo('student');
@@ -153,17 +248,21 @@ async function login(e) {
     }
 }
 
+// ==================== 注册 ====================
+
 async function register(e) {
     e.preventDefault();
     const username = document.getElementById('regUsername').value.trim();
     const password = document.getElementById('regPassword').value.trim();
+    const email = document.getElementById('regEmail').value.trim();
+    const code = document.getElementById('regCode').value.trim();
     const phone = document.getElementById('regPhone').value.trim();
     const real_name = document.getElementById('regRealName').value.trim();
     const role = document.getElementById('regRole').value;
     const dormitory = document.getElementById('regDormitory').value;
 
-    if (!username || !password || !phone) {
-        toast('请填写必填项', 'error');
+    if (!username || !password || !email || !code) {
+        toast('请填写所有必填项', 'error');
         return;
     }
 
@@ -172,9 +271,14 @@ async function register(e) {
         return;
     }
 
+    if (code.length !== 6) {
+        toast('请输入6位验证码', 'error');
+        return;
+    }
+
     const res = await api('/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ username, password, phone, real_name, role, dormitory })
+        body: JSON.stringify({ username, password, phone, email, code, real_name, role, dormitory })
     });
 
     if (res.code === 200) {
