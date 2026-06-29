@@ -444,10 +444,8 @@ function showQRPay(method) {
 
     if (method === 'alipay') {
         document.getElementById('qrMethodName').textContent = '支付宝';
-        document.getElementById('qrIcon').textContent = '🔵';
     } else {
         document.getElementById('qrMethodName').textContent = '微信';
-        document.getElementById('qrIcon').textContent = '🟢';
     }
 
     document.getElementById('payStepMethod').style.display = 'none';
