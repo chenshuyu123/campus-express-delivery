@@ -603,7 +603,8 @@ function renderOrderItem(order, viewType) {
                 <span>📏 大小：<strong>${sizeLabel}</strong></span>
                 <span>💰 金额：<strong>¥${order.total_price.toFixed(2)}</strong></span>
                 ${order.is_urgent ? '<span>⚡ <strong style="color:#EF4444;">加急订单</strong></span>' : ''}
-                ${order.rider_name ? `<span>🛵 骑手：<strong>${order.rider_name}</strong></span>` : ''}
+                ${order.rider_name ? `<span>🛵 骑手：<strong>${order.rider_name}</strong> ${order.rider_phone ? `<span style="color:#3B82F6;">📞 ${order.rider_phone}</span>` : ''}</span>` : ''}
+                ${order.student_name ? `<span>👤 单主：<strong>${order.student_name}</strong> ${order.student_phone ? `<span style="color:#3B82F6;">📞 ${order.student_phone}</span>` : ''}</span>` : ''}
                 <span>🕐 ${order.created_at}</span>
             </div>
             ${actions ? `<div class="order-actions">${actions}</div>` : ''}
@@ -717,6 +718,7 @@ async function loadAvailableOrders(page = 1) {
                     <span>🔑 ${order.pickup_code}</span>
                     <span>🏠 ${order.dormitory} ${order.building || ''}</span>
                     <span>📏 ${order.size === 'large' ? '大件' : '小件'}</span>
+                    ${order.student_name ? `<span>👤 ${order.student_name} <span style="color:#3B82F6;">📞 ${order.student_phone || '未留'}</span></span>` : ''}
                     <span>🕐 ${order.created_at}</span>
                 </div>
                 <div class="order-actions">

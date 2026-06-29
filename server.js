@@ -539,15 +539,17 @@ app.post('/api/orders/:id/wechatpay', authMiddleware, async (req, res) => {
 app.get('/api/orders/my', authMiddleware, (req, res) => {
     try {
         const { status, page = 1, pageSize = 20 } = req.query;
-        let sql = 'SELECT * FROM orders WHERE student_id = ?';
+        let sql = `SELECT o.*, r.real_name as rider_name, r.phone as rider_phone
+                   FROM orders o LEFT JOIN users r ON o.rider_id = r.id
+                   WHERE o.student_id = ?`;
         const params = [req.user.id];
 
-        if (status) { sql += ' AND status = ?'; params.push(status); }
+        if (status) { sql += ' AND o.status = ?'; params.push(status); }
 
-        const countSql = sql.replace('SELECT *', 'SELECT COUNT(*) as total');
+        const countSql = sql.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM');
         const total = db.prepare(countSql).get(...params)?.total || 0;
 
-        sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+        sql += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
         params.push(Number(pageSize), (Number(page) - 1) * Number(pageSize));
 
         const orders = db.prepare(sql).all(...params);
@@ -610,7 +612,7 @@ app.get('/api/rider/orders/available', authMiddleware, riderMiddleware, (req, re
     try {
         const { page = 1, pageSize = 20 } = req.query;
         const orders = db.prepare(`
-            SELECT o.*, s.real_name as student_name, s.dormitory as student_dormitory
+            SELECT o.*, s.real_name as student_name, s.dormitory as student_dormitory, s.phone as student_phone
             FROM orders o LEFT JOIN users s ON o.student_id = s.id
             WHERE o.status = 'paid'
             ORDER BY o.is_urgent DESC, o.created_at ASC
