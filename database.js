@@ -1,23 +1,25 @@
 /**
  * 数据库初始化和管理 - 使用 sql.js (纯JavaScript SQLite)
  * 无需任何原生编译，跨平台兼容
- * Railway 上使用内存模式（文件系统不持久化）
+ * 优先使用 data 目录持久化，Railway 上也尝试持久化
  */
 
 const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-// Railway 使用 /tmp 目录，但重启会丢失；本地使用 data 目录
-const IS_RAILWAY = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_SERVICE_ID;
-const DATA_DIR = IS_RAILWAY ? '/tmp' : path.join(__dirname, 'data');
+const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'campus_express.db');
 
 let db = null;
 
 // 确保目录存在
-if (!IS_RAILWAY && !fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+try {
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+} catch (e) {
+    console.error('创建data目录失败，将使用内存模式:', e.message);
 }
 
 // 初始化数据库
@@ -27,10 +29,17 @@ async function getDb() {
     const SQL = await initSqlJs();
 
     // 如果数据库文件存在则加载，否则创建新的
-    if (fs.existsSync(DB_PATH)) {
-        const buffer = fs.readFileSync(DB_PATH);
-        db = new SQL.Database(buffer);
-    } else {
+    try {
+        if (fs.existsSync(DB_PATH)) {
+            const buffer = fs.readFileSync(DB_PATH);
+            db = new SQL.Database(buffer);
+            console.log('从文件加载数据库:', DB_PATH, '大小:', buffer.length, 'bytes');
+        } else {
+            db = new SQL.Database();
+            console.log('创建新的内存数据库');
+        }
+    } catch (e) {
+        console.error('加载数据库文件失败，使用内存模式:', e.message);
         db = new SQL.Database();
     }
 
@@ -41,12 +50,16 @@ async function getDb() {
     return db;
 }
 
-// 保存数据库到文件（Railway上跳过，因为文件系统不持久化）
+// 保存数据库到文件（总是尝试保存）
 function saveDb() {
-    if (db && !IS_RAILWAY) {
+    if (!db) return;
+    try {
         const data = db.export();
         const buffer = Buffer.from(data);
         fs.writeFileSync(DB_PATH, buffer);
+        console.log('数据库已保存到:', DB_PATH, '大小:', buffer.length, 'bytes');
+    } catch (e) {
+        console.error('保存数据库失败:', e.message);
     }
 }
 

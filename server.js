@@ -389,7 +389,7 @@ app.get('/api/config/pricing', (req, res) => {
 app.get('/api/home/stats', (req, res) => {
     try {
         const totalOrders = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
-        const totalRiders = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'rider' AND rider_status = 'approved'").get().count;
+        const totalRiders = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'rider' AND verify_status = 'approved'").get().count;
         const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
         res.json({ code: 200, data: { totalOrders, totalRiders, totalUsers } });
     } catch (err) {
