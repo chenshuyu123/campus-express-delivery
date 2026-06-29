@@ -970,62 +970,12 @@ a:hover { text-decoration: underline; }
     .order-detail { grid-template-columns: 1fr; }
 }
 
-/* ==================== 登录/注册 - 验证码样式 ==================== */
-.login-tabs {
-    display: flex;
-    gap: 0;
-    margin-bottom: 16px;
-    border-bottom: 2px solid var(--border);
-}
-
-.login-tab {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    font-size: 14px;
-    color: var(--text-secondary);
-    transition: var(--transition);
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-}
-
-.login-tab.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-    font-weight: 600;
-}
-
-.login-tab:hover {
-    color: var(--primary);
-}
-
-.code-input-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.code-input-row input {
-    flex: 1;
-}
-
-.send-code-btn {
-    white-space: nowrap;
-    min-width: 100px;
-    height: 42px;
-    font-size: 13px;
-}
-
-.send-code-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    background: #e5e7eb;
-    color: #9ca3af;
-    border-color: #d1d5db;
-}
-
+/* ==================== 注册表单提示文字 ==================== */
 .required {
     color: #ef4444;
+}
+
+.form-group small {
+    display: block;
+    margin-top: 4px;
 }

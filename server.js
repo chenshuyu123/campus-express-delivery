@@ -3,10 +3,6 @@
  * 技术栈: Node.js + Express + sql.js (纯JS SQLite)
  */
 
-// 强制 DNS 使用 IPv4，解决 Railway IPv6 不可达问题
-const dns = require('dns');
-dns.setDefaultResultOrder('ipv4first');
-
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -22,46 +18,6 @@ const PORT = process.env.PORT || 3000;
 
 // JWT密钥
 const JWT_SECRET = process.env.JWT_SECRET || 'campus_express_secret_key_2024';
-
-// ==================== 邮箱验证码配置 ====================
-const nodemailer = require('nodemailer');
-
-// QQ邮箱配置（也支持163等其他邮箱）
-const EMAIL_CONFIG = {
-    host: process.env.EMAIL_HOST || 'smtp.qq.com',
-    port: parseInt(process.env.EMAIL_PORT) || 465,
-    secure: true,
-    auth: {
-        user: process.env.EMAIL_USER || '',
-        pass: process.env.EMAIL_PASS || ''
-    }
-};
-
-function getTransporter() {
-    // 每次都重新创建，确保使用最新的环境变量
-    const port = parseInt(process.env.EMAIL_PORT) || 465;
-    return nodemailer.createTransport({
-        host: process.env.EMAIL_HOST || 'smtp.qq.com',
-        port: port,
-        secure: true,
-        auth: {
-            user: process.env.EMAIL_USER || '',
-            pass: process.env.EMAIL_PASS || ''
-        },
-        tls: {
-            rejectUnauthorized: false
-        },
-        // 强制使用 IPv4，避免 Railway 的 IPv6 问题
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 10000
-    });
-}
-
-// 生成6位随机验证码
-function generateCode() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-}
 
 // 全局数据库引用
 let db = null;
@@ -115,155 +71,87 @@ function riderMiddleware(req, res, next) {
 
 // ==================== 认证接口 ====================
 
-// ==================== 邮箱验证码 ====================
+// ==================== 身份证号校验工具函数 ====================
 
-// 发送邮箱验证码
-const sendCodeLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1分钟内
-    max: 1, // 最多1次
-    message: { code: 429, message: '发送过于频繁，请60秒后再试' }
-});
-
-app.post('/api/auth/send-code', sendCodeLimiter, async (req, res) => {
-    try {
-        const { email, type } = req.body;
-
-        if (!email) {
-            return res.json({ code: 400, message: '请输入邮箱地址' });
-        }
-
-        // 检查邮箱格式
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.json({ code: 400, message: '邮箱格式不正确' });
-        }
-
-        // 注册时检查邮箱是否已注册
-        if (type === 'register') {
-            const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-            if (existing) {
-                return res.json({ code: 400, message: '该邮箱已被注册' });
-            }
-        }
-
-        // 登录时检查邮箱是否存在
-        if (type === 'login') {
-            const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-            if (!existing) {
-                return res.json({ code: 400, message: '该邮箱未注册' });
-            }
-        }
-
-        // 生成验证码
-        const code = generateCode();
-
-        // 存入数据库（5分钟有效）
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-        db.prepare(`
-            INSERT INTO email_codes (email, code, type, expires_at)
-            VALUES (?, ?, ?, ?)
-        `).run(email, code, type || 'register', expiresAt);
-
-        // 发送邮件
-        const mailer = getTransporter();
-        
-        // 调试日志
-        console.log('邮件配置检查:', {
-            host: process.env.EMAIL_HOST || 'smtp.qq.com',
-            user: process.env.EMAIL_USER ? process.env.EMAIL_USER.substring(0, 5) + '***' : '未设置',
-            passExist: !!process.env.EMAIL_PASS
-        });
-        
-        const typeNames = { register: '注册', login: '登录', reset_password: '重置密码' };
-        const typeName = typeNames[type] || '验证';
-
-        const mailResult = await mailer.sendMail({
-            from: `"校园快递系统" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: `校园快递系统 - ${typeName}验证码`,
-            html: `
-                <div style="max-width:500px;margin:0 auto;padding:20px;font-family:Arial,sans-serif;">
-                    <h2 style="color:#1a73e8;">校园快递代取系统</h2>
-                    <p>您的${typeName}验证码是：</p>
-                    <div style="background:#f0f4ff;padding:15px;text-align:center;border-radius:8px;margin:20px 0;">
-                        <span style="font-size:32px;font-weight:bold;color:#1a73e8;letter-spacing:5px;">${code}</span>
-                    </div>
-                    <p style="color:#666;">验证码5分钟内有效，请勿泄露给他人。</p>
-                    <hr style="border:none;border-top:1px solid #eee;">
-                    <p style="color:#999;font-size:12px;">如非本人操作，请忽略此邮件。</p>
-                </div>
-            `
-        });
-
-        console.log('邮件发送成功:', mailResult.messageId);
-        res.json({ code: 200, message: '验证码已发送到您的邮箱' });
-
-    } catch (err) {
-        console.error('发送验证码失败:', err.message, err.code, err.command);
-        res.json({ code: 500, message: '发送失败: ' + err.message });
+/**
+ * 校验身份证号格式与校验位
+ * 规则：18位，前17位数字+最后1位数字或X
+ * 校验位算法：ISO 7064:1983.MOD 11-2
+ */
+function isValidIdCard(idCard) {
+    if (!idCard || typeof idCard !== 'string') return false;
+    
+    // 18位格式校验
+    if (!/^\d{17}[\dXx]$/.test(idCard)) return false;
+    
+    // 校验位验证
+    const weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+    const checkCodes = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'];
+    
+    let sum = 0;
+    for (let i = 0; i < 17; i++) {
+        sum += parseInt(idCard[i]) * weights[i];
     }
-});
+    
+    const checkChar = checkCodes[sum % 11];
+    return idCard[17].toUpperCase() === checkChar;
+}
 
-// 验证邮箱验证码
-app.post('/api/auth/verify-code', async (req, res) => {
-    try {
-        const { email, code, type } = req.body;
-
-        if (!email || !code) {
-            return res.json({ code: 400, message: '邮箱和验证码不能为空' });
-        }
-
-        // 查找有效的验证码
-        const record = db.prepare(`
-            SELECT * FROM email_codes 
-            WHERE email = ? AND code = ? AND type = ? AND used = 0 AND expires_at > datetime('now')
-            ORDER BY created_at DESC LIMIT 1
-        `).get(email, code, type || 'register');
-
-        if (!record) {
-            return res.json({ code: 400, message: '验证码错误或已过期' });
-        }
-
-        // 标记验证码已使用
-        db.prepare('UPDATE email_codes SET used = 1 WHERE id = ?').run(record.id);
-
-        res.json({ code: 200, message: '验证成功' });
-
-    } catch (err) {
-        console.error('验证失败:', err);
-        res.json({ code: 500, message: '验证失败: ' + err.message });
-    }
-});
+/**
+ * 校验手机号格式
+ * 中国大陆手机号：1开头，第二位3-9，共11位
+ */
+function isValidPhone(phone) {
+    return /^1[3-9]\d{9}$/.test(phone);
+}
 
 // ==================== 注册/登录 ====================
 
-// 注册（增加邮箱+验证码）
+// 注册（身份证号 + 手机号双重认证）
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { username, password, phone, email, code, real_name, role, dormitory } = req.body;
+        const { username, password, phone, id_card, real_name, role, dormitory } = req.body;
 
-        if (!username || !password || !email || !code) {
-            return res.json({ code: 400, message: '用户名、密码、邮箱和验证码不能为空' });
+        // 基本校验
+        if (!username || !password) {
+            return res.json({ code: 400, message: '用户名和密码不能为空' });
+        }
+        if (!phone) {
+            return res.json({ code: 400, message: '手机号不能为空' });
+        }
+        if (!id_card) {
+            return res.json({ code: 400, message: '身份证号不能为空' });
+        }
+        if (password.length < 6) {
+            return res.json({ code: 400, message: '密码至少6位' });
         }
 
-        // 验证邮箱验证码
-        const codeRecord = db.prepare(`
-            SELECT * FROM email_codes 
-            WHERE email = ? AND code = ? AND type = 'register' AND used = 0 AND expires_at > datetime('now')
-            ORDER BY created_at DESC LIMIT 1
-        `).get(email, code);
-
-        if (!codeRecord) {
-            return res.json({ code: 400, message: '验证码错误或已过期，请重新获取' });
+        // 手机号格式校验
+        if (!isValidPhone(phone)) {
+            return res.json({ code: 400, message: '手机号格式不正确，请输入11位中国大陆手机号' });
         }
 
-        // 标记验证码已使用
-        db.prepare('UPDATE email_codes SET used = 1 WHERE id = ?').run(codeRecord.id);
+        // 身份证号格式+校验位验证
+        if (!isValidIdCard(id_card)) {
+            return res.json({ code: 400, message: '身份证号格式不正确，请检查后重新输入' });
+        }
 
-        // 检查用户名/邮箱是否重复
-        const existingUser = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email);
-        if (existingUser) {
-            return res.json({ code: 400, message: '用户名或邮箱已被注册' });
+        // 检查用户名是否已存在
+        const existingUsername = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+        if (existingUsername) {
+            return res.json({ code: 400, message: '该用户名已被注册' });
+        }
+
+        // 检查手机号是否已绑定
+        const existingPhone = db.prepare('SELECT id FROM users WHERE phone = ?').get(phone);
+        if (existingPhone) {
+            return res.json({ code: 400, message: '该手机号已被其他账号绑定' });
+        }
+
+        // 检查身份证号是否已绑定（一个身份证只能绑定一个账号）
+        const existingIdCard = db.prepare("SELECT id, username FROM users WHERE id_card = ? AND id_card != ''").get(id_card);
+        if (existingIdCard) {
+            return res.json({ code: 400, message: '该身份证号已被绑定到账号: ' + existingIdCard.username });
         }
 
         const hashedPassword = bcrypt.hashSync(password, 10);
@@ -271,9 +159,9 @@ app.post('/api/auth/register', async (req, res) => {
         const userRole = role || 'student';
 
         db.prepare(`
-            INSERT INTO users (id, username, password, phone, email, real_name, role, dormitory, status)
+            INSERT INTO users (id, username, password, phone, id_card, real_name, role, dormitory, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-        `).run(userId, username, hashedPassword, phone || '', email, real_name || '', userRole, dormitory || '');
+        `).run(userId, username, hashedPassword, phone, id_card, real_name || '', userRole, dormitory || '');
 
         const token = jwt.sign({ id: userId, username, role: userRole }, JWT_SECRET, { expiresIn: '7d' });
 
@@ -282,7 +170,7 @@ app.post('/api/auth/register', async (req, res) => {
             message: '注册成功',
             data: {
                 token,
-                user: { id: userId, username, phone, email, real_name: real_name || '', role: userRole, dormitory: dormitory || '' }
+                user: { id: userId, username, phone, id_card, real_name: real_name || '', role: userRole, dormitory: dormitory || '' }
             }
         });
     } catch (err) {
@@ -291,61 +179,22 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// 登录（支持用户名/邮箱 + 密码，或邮箱 + 验证码）
+// 登录（用户名/手机号 + 密码）
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { username, password, email, code, loginType } = req.body;
+        const { username, password } = req.body;
 
-        // 方式1：邮箱+验证码登录
-        if (loginType === 'code' && email && code) {
-            const codeRecord = db.prepare(`
-                SELECT * FROM email_codes 
-                WHERE email = ? AND code = ? AND type = 'login' AND used = 0 AND expires_at > datetime('now')
-                ORDER BY created_at DESC LIMIT 1
-            `).get(email, code);
-
-            if (!codeRecord) {
-                return res.json({ code: 400, message: '验证码错误或已过期，请重新获取' });
-            }
-
-            db.prepare('UPDATE email_codes SET used = 1 WHERE id = ?').run(codeRecord.id);
-
-            const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-            if (!user) {
-                return res.json({ code: 400, message: '该邮箱未注册' });
-            }
-
-            if (user.status === 'banned') {
-                return res.json({ code: 403, message: '账号已被封禁' });
-            }
-
-            const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-
-            return res.json({
-                code: 200, message: '登录成功',
-                data: {
-                    token,
-                    user: {
-                        id: user.id, username: user.username, phone: user.phone, email: user.email,
-                        real_name: user.real_name, role: user.role, dormitory: user.dormitory,
-                        avatar: user.avatar, verify_status: user.verify_status, balance: user.balance
-                    }
-                }
-            });
-        }
-
-        // 方式2：用户名/邮箱 + 密码登录
-        if (!username && !email) {
-            return res.json({ code: 400, message: '请输入用户名或邮箱' });
+        if (!username) {
+            return res.json({ code: 400, message: '请输入用户名或手机号' });
         }
         if (!password) {
             return res.json({ code: 400, message: '请输入密码' });
         }
 
-        // 支持用邮箱或用户名登录
+        // 支持用手机号或用户名登录
         let user;
-        if (email) {
-            user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        if (isValidPhone(username)) {
+            user = db.prepare('SELECT * FROM users WHERE phone = ?').get(username);
         } else {
             user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
         }
@@ -380,6 +229,7 @@ app.post('/api/auth/login', async (req, res) => {
                     id: user.id,
                     username: user.username,
                     phone: user.phone,
+                    id_card: user.id_card,
                     real_name: user.real_name,
                     role: user.role,
                     dormitory: user.dormitory,
@@ -398,9 +248,13 @@ app.post('/api/auth/login', async (req, res) => {
 // 获取当前用户信息
 app.get('/api/auth/me', authMiddleware, (req, res) => {
     try {
-        const user = db.prepare('SELECT id, username, phone, real_name, role, dormitory, avatar, verify_status, balance, status, created_at FROM users WHERE id = ?').get(req.user.id);
+        const user = db.prepare('SELECT id, username, phone, id_card, real_name, role, dormitory, avatar, verify_status, balance, status, created_at FROM users WHERE id = ?').get(req.user.id);
         if (!user) {
             return res.json({ code: 404, message: '用户不存在' });
+        }
+        // 脱敏处理：身份证号仅显示前6位和后4位
+        if (user.id_card && user.id_card.length >= 10) {
+            user.id_card_masked = user.id_card.slice(0, 6) + '********' + user.id_card.slice(-4);
         }
         res.json({ code: 200, data: user });
     } catch (err) {
@@ -474,6 +328,28 @@ app.post('/api/rider/verify', authMiddleware, async (req, res) => {
 
         if (!real_name || !student_id || !phone || !id_card) {
             return res.json({ code: 400, message: '请填写完整的认证信息' });
+        }
+
+        // 校验手机号格式
+        if (!isValidPhone(phone)) {
+            return res.json({ code: 400, message: '手机号格式不正确' });
+        }
+
+        // 校验身份证号格式
+        if (!isValidIdCard(id_card)) {
+            return res.json({ code: 400, message: '身份证号格式不正确' });
+        }
+
+        // 检查身份证号是否已被其他用户绑定
+        const existingIdCard = db.prepare("SELECT id, username FROM users WHERE id_card = ? AND id != ? AND id_card != ''").get(id_card, req.user.id);
+        if (existingIdCard) {
+            return res.json({ code: 400, message: '该身份证号已被绑定到账号: ' + existingIdCard.username });
+        }
+
+        // 检查手机号是否已被其他用户使用
+        const existingPhone = db.prepare('SELECT id FROM users WHERE phone = ? AND id != ?').get(phone, req.user.id);
+        if (existingPhone) {
+            return res.json({ code: 400, message: '该手机号已被其他用户使用' });
         }
 
         db.prepare(`

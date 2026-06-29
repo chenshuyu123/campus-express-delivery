@@ -31,24 +31,6 @@ async function initDatabase() {
         )
     `);
 
-    // 邮箱验证码表
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS email_codes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT NOT NULL,
-            code TEXT NOT NULL,
-            type TEXT DEFAULT 'register' CHECK(type IN ('register', 'login', 'reset_password')),
-            used INTEGER DEFAULT 0,
-            expires_at TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
-        )
-    `);
-
-    db.exec(`
-        CREATE INDEX IF NOT EXISTS idx_email_codes_email ON email_codes(email);
-        CREATE INDEX IF NOT EXISTS idx_email_codes_type ON email_codes(type);
-    `);
-
     // 订单表
     db.exec(`
         CREATE TABLE IF NOT EXISTS orders (
