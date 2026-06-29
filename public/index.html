@@ -195,6 +195,19 @@
                             <div class="empty-state">请先登录查看订单</div>
                         </div>
                     </div>
+                    <div class="my-orders-card">
+                        <h3>所有订单</h3>
+                        <div class="order-tabs">
+                            <button class="order-tab active" onclick="filterAllOrders('')">全部</button>
+                            <button class="order-tab" onclick="filterAllOrders('pending_payment')">待支付</button>
+                            <button class="order-tab" onclick="filterAllOrders('paid')">待接单</button>
+                            <button class="order-tab" onclick="filterAllOrders('accepted')">配送中</button>
+                            <button class="order-tab" onclick="filterAllOrders('completed')">已完成</button>
+                        </div>
+                        <div class="orders-list" id="allOrdersList">
+                            <div class="empty-state">加载中...</div>
+                        </div>
+                    </div>
                 </div>
             </section>
 

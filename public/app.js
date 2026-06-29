@@ -68,9 +68,13 @@ function navigateTo(page) {
     // 关闭移动菜单
     document.getElementById('navLinks').classList.remove('open');
 
+    // 切换到首页时刷新统计数据
+    if (page === 'home') loadHomeStats();
+
     // 根据页面加载数据
     if (page === 'student' && currentUser) {
         loadMyOrders();
+        loadAllOrders();
         loadPricing();
     }
     if (page === 'rider' && currentUser) {
@@ -425,6 +429,7 @@ async function payOrder(method) {
         closeModal('payModal');
         currentPayOrderId = null;
         loadMyOrders();
+        loadAllOrders();
     } else {
         toast(res.message || '支付失败', 'error');
     }
@@ -483,6 +488,7 @@ async function confirmQRPay() {
         currentPayOrderId = null;
         currentQRPayType = null;
         loadMyOrders();
+        loadAllOrders();
     } else {
         toast(res.message || '支付失败', 'error');
         btn.disabled = false;
@@ -514,6 +520,7 @@ function payPendingOrder(orderId) {
 
 // ==================== 学生端：我的订单 ====================
 let myOrdersFilter = '';
+let allOrdersFilter = '';
 async function loadMyOrders(page = 1) {
     if (!currentUser) return;
 
@@ -535,10 +542,40 @@ async function loadMyOrders(page = 1) {
 
 function filterMyOrders(status) {
     myOrdersFilter = status;
-    document.querySelectorAll('#page-student .order-tab').forEach(t => t.classList.remove('active'));
-    const tab = document.querySelector(`#page-student [onclick="filterMyOrders('${status}')"]`);
+    const container = document.getElementById('myOrdersList').parentElement;
+    container.querySelectorAll('.order-tab').forEach(t => t.classList.remove('active'));
+    const tab = container.querySelector(`[onclick="filterMyOrders('${status}')"]`);
     if (tab) tab.classList.add('active');
     loadMyOrders();
+}
+
+// ==================== 所有订单（学生端公开查看） ====================
+async function loadAllOrders(page = 1) {
+    if (!currentUser) return;
+
+    const params = new URLSearchParams({ page, pageSize: 20 });
+    if (allOrdersFilter) params.set('status', allOrdersFilter);
+
+    const res = await api(`/orders/all?${params}`);
+    const container = document.getElementById('allOrdersList');
+
+    if (res.code === 200) {
+        const { orders } = res.data;
+        if (orders.length === 0) {
+            container.innerHTML = '<div class="empty-state">暂无订单</div>';
+            return;
+        }
+        container.innerHTML = orders.map(order => renderOrderItem(order, 'all')).join('');
+    }
+}
+
+function filterAllOrders(status) {
+    allOrdersFilter = status;
+    const container = document.getElementById('allOrdersList').parentElement;
+    container.querySelectorAll('.order-tab').forEach(t => t.classList.remove('active'));
+    const tab = container.querySelector(`[onclick="filterAllOrders('${status}')"]`);
+    if (tab) tab.classList.add('active');
+    loadAllOrders();
 }
 
 async function cancelOrder(orderId) {
@@ -548,6 +585,7 @@ async function cancelOrder(orderId) {
     if (res.code === 200) {
         toast(res.message, 'success');
         loadMyOrders();
+        loadAllOrders();
     } else {
         toast(res.message || '取消失败', 'error');
     }
@@ -1263,14 +1301,23 @@ async function changePassword(e) {
 
 // ==================== 首页统计 ====================
 async function loadHomeStats() {
-    // 首页简单统计，不需要登录
+    // 首页公开统计 + 定价
     try {
-        const res = await api('/config/pricing');
-        if (res.code === 200) {
-            pricingConfig = res.data;
+        const [statsRes, pricingRes] = await Promise.all([
+            api('/home/stats'),
+            api('/config/pricing')
+        ]);
+        if (statsRes.code === 200) {
+            const d = statsRes.data;
+            document.getElementById('statOrders').textContent = d.totalOrders || 0;
+            document.getElementById('statRiders').textContent = d.totalRiders || 0;
+            document.getElementById('statUsers').textContent = d.totalUsers || 0;
+        }
+        if (pricingRes.code === 200) {
+            pricingConfig = pricingRes.data;
             updatePriceDisplay();
         }
-    } catch (e) {}
+    } catch (e) { console.error('loadHomeStats error:', e); }
 }
 
 // ==================== 点击弹窗外部关闭 ====================

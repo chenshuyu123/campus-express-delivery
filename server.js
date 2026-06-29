@@ -385,6 +385,18 @@ app.get('/api/config/pricing', (req, res) => {
     }
 });
 
+// 首页公开统计
+app.get('/api/home/stats', (req, res) => {
+    try {
+        const totalOrders = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
+        const totalRiders = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'rider' AND rider_status = 'approved'").get().count;
+        const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+        res.json({ code: 200, data: { totalOrders, totalRiders, totalUsers } });
+    } catch (err) {
+        res.json({ code: 200, data: { totalOrders: 0, totalRiders: 0, totalUsers: 0 } });
+    }
+});
+
 // ==================== 订单接口 ====================
 
 // 创建订单
@@ -545,6 +557,31 @@ app.get('/api/orders/my', authMiddleware, (req, res) => {
         const params = [req.user.id];
 
         if (status) { sql += ' AND o.status = ?'; params.push(status); }
+
+        const countSql = sql.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM');
+        const total = db.prepare(countSql).get(...params)?.total || 0;
+
+        sql += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
+        params.push(Number(pageSize), (Number(page) - 1) * Number(pageSize));
+
+        const orders = db.prepare(sql).all(...params);
+        res.json({ code: 200, data: { orders, total, page: Number(page), pageSize: Number(pageSize) } });
+    } catch (err) {
+        res.json({ code: 500, message: err.message });
+    }
+});
+
+// 所有订单（公开查看，需登录）
+app.get('/api/orders/all', authMiddleware, (req, res) => {
+    try {
+        const { status, page = 1, pageSize = 20 } = req.query;
+        let sql = `SELECT o.*, s.real_name as student_name, r.real_name as rider_name, r.phone as rider_phone
+                   FROM orders o 
+                   LEFT JOIN users s ON o.student_id = s.id
+                   LEFT JOIN users r ON o.rider_id = r.id`;
+        const params = [];
+
+        if (status) { sql += ' WHERE o.status = ?'; params.push(status); }
 
         const countSql = sql.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM');
         const total = db.prepare(countSql).get(...params)?.total || 0;
