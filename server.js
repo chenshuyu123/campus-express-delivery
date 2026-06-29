@@ -53,10 +53,10 @@ function authMiddleware(req, res, next) {
     }
 }
 
-// 管理员权限检查
+// 管理员权限检查（仅限用户名admin的管理员账号）
 function adminMiddleware(req, res, next) {
-    if (req.user.role !== 'admin') {
-        return res.json({ code: 403, message: '无权限访问' });
+    if (req.user.role !== 'admin' || req.user.username !== 'admin') {
+        return res.json({ code: 403, message: '无权限访问，仅限系统管理员' });
     }
     next();
 }

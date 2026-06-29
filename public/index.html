@@ -111,7 +111,12 @@
                                     <option value="19号楼">19号楼</option><option value="20号楼">20号楼</option>
                                     <option value="21号楼">21号楼</option><option value="22号楼">22号楼</option>
                                     <option value="23号楼">23号楼</option>
+                                    <option value="其他">其他地址请备注</option>
                                 </select>
+                            </div>
+                            <div class="form-group" id="orderOtherAddressGroup" style="display:none;">
+                                <label>请输入具体地址 <span class="required">*</span></label>
+                                <input type="text" id="orderOtherAddress" placeholder="请输入具体配送地址">
                             </div>
                             <div class="form-group">
                                 <label>楼栋/宿舍号</label>
@@ -524,9 +529,6 @@
                 </form>
                 <div class="modal-footer">
                     <span>没有账号？<a href="#" onclick="closeModal('loginModal');showRegisterModal()">立即注册</a></span>
-                </div>
-                <div class="modal-hint">
-                    <small>测试账号：管理员 admin/admin123 | 学生 student/123456 | 骑手 rider/123456</small>
                 </div>
             </div>
         </div>

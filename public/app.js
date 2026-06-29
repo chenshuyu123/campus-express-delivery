@@ -77,7 +77,7 @@ function navigateTo(page) {
         loadRiderPage();
     }
     if (page === 'admin') {
-        if (currentUser && currentUser.role === 'admin') {
+        if (currentUser && currentUser.role === 'admin' && currentUser.username === 'admin') {
             loadAdminDashboard();
         } else {
             toast('请使用管理员账号登录', 'warning');
@@ -146,7 +146,7 @@ async function login(e) {
         updateNavUI();
         toast('登录成功', 'success');
 
-        if (currentUser.role === 'admin') navigateTo('admin');
+        if (currentUser.role === 'admin' && currentUser.username === 'admin') navigateTo('admin');
         else if (currentUser.role === 'rider') navigateTo('rider');
         else navigateTo('student');
     } else {
@@ -265,7 +265,7 @@ function updateNavUI() {
     // 更新导航链接可见性
     document.getElementById('navStudent').style.display = 'inline';
     document.getElementById('navRider').style.display = 'inline';
-    document.getElementById('navAdmin').style.display = (currentUser?.role === 'admin') ? 'inline' : 'none';
+    document.getElementById('navAdmin').style.display = (currentUser?.role === 'admin' && currentUser?.username === 'admin') ? 'inline' : 'none';
     document.getElementById('navProfile').style.display = currentUser ? 'inline' : 'none';
     document.getElementById('navSettings').style.display = currentUser ? 'inline' : 'none';
 }
@@ -353,13 +353,25 @@ async function submitOrder(e) {
         return;
     }
 
-    const dormitory = document.getElementById('orderDormitory').value;
+    let dormitory = document.getElementById('orderDormitory').value;
     const building = document.getElementById('orderBuilding').value;
     const cabinet = document.getElementById('orderCabinet').value;
     const pickup_code = document.getElementById('orderPickupCode').value.trim();
     const size = document.querySelector('input[name="orderSize"]:checked')?.value || 'small';
     const scheduled_time = document.getElementById('orderScheduledTime').value;
-    const remark = document.getElementById('orderRemark').value.trim();
+    let remark = document.getElementById('orderRemark').value.trim();
+
+    // 处理"其他地址请备注"
+    if (dormitory === '其他') {
+        const otherAddr = document.getElementById('orderOtherAddress').value.trim();
+        if (!otherAddr) {
+            toast('请填写具体配送地址', 'error');
+            return;
+        }
+        dormitory = otherAddr;
+        // 把具体地址也追加到备注
+        remark = remark ? '【配送地址：' + otherAddr + '】' + remark : '【配送地址：' + otherAddr + '】';
+    }
 
     if (!dormitory || !cabinet || !pickup_code) {
         toast('请填写必填项', 'error');
@@ -1275,6 +1287,16 @@ document.getElementById('regRole')?.addEventListener('change', function() {
         dormitoryGroup.style.display = 'none';
     } else {
         dormitoryGroup.style.display = 'block';
+    }
+});
+
+// ==================== 宿舍楼"其他"选项切换 ====================
+document.getElementById('orderDormitory')?.addEventListener('change', function() {
+    const otherGroup = document.getElementById('orderOtherAddressGroup');
+    if (this.value === '其他') {
+        otherGroup.style.display = 'block';
+    } else {
+        otherGroup.style.display = 'none';
     }
 });
 
